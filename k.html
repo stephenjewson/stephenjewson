@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<!--
+MIT License
+
+Copyright (c) 2021 Kai Jewson
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Date:
+ 21-05-13
+
+Author:
+ Kai Jewson with help from Stephen Jewson and Lynne Jewson
+ comments to stephen.jewson@gmail.com
+
+Publications:
+ This code is provided as supplementary material for the publication:
+ Conversion of the Knutson et al. (2020) Tropical Cyclone Climate Change Projections to Risk Model Baselines https://doi.org/10.1175/JAMC-D-21-0102.1
+
+What it does:
+ This code relates to Knutson et al (2020) (K2020)
+ It includes the raw data used to create Figs 1b, 2b, 3b and 4b in that paper
+ It also includes GMST data (historical and CMIP5 simulated)
+ It combines these two data sets to produce TC projections for any historical baseline
+
+How it works:
+ The code has past and future GMST hard-wired in, for 4 RCPs
+ The code also has the data for Knutson et al (2020) figures 1b, 2b, 3b and 4b hard-wired in
+ It allows the user to select a temporal baseline, a figure, a region and a metric
+ And then it uses the GMST to interpolate and extrapolate from the Knutson data to create
+  annual and decadal values for that statistic for all RCPs
+ All relative to the specified baseline time period
+ Using a log-linear model for TC property vs GMST
+ As described in Jewson (2021)
+ Decadal projections shown on the screen in a table and as csv
+
+How to use it:
+ Open the file in a browser
+ Select values for the 5 dropdowns
+ The results will immediately populate
+ To paste the results into a file, click the copy button
+-->
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Knutson et al 2020 Baseline Conversion</title>
+
+<style>
+input:invalid {
+	border-color: red;
+}
+table {
+	border-collapse: collapse;
+}
+th, td {
+	border: 1px solid grey;
+	padding: 4px;
+}
+</style>
+	</head>
+	<body>
+		<h1>Knutson et al. 2020 Baseline Conversion</h1>
+		<p>(c) Kai Jewson, Stephen Jewson (MIT license: see source code for details)</p>
+
+		<h3>Documentation:</h3>
+		<p><a href="https://doi.org/10.1175/JAMC-D-21-0102.1">https://doi.org/10.1175/JAMC-D-21-0102.1</a></p>
+
+		<h3>Instructions</h3>
+		<ul>
+			<li>To convert the Knutson et al. data to a specific historical baseline, make the 5 selections, and the results will appear in the table below.</li>
+			<li>Results can be copied and pasted into a file as CSV using the copy button below the table.</li>
+		</ul>
+
+		<p>
+		<label>1) Historical baseline start year:
+			<input type="number" id="base_start_year" required value="1950" min="1880" max="2100" step="1">
+		</label>
+		</p>
+
+		<p>
+		<label>2) Historical baseline end year:
+			<input type="number" id="base_end_year" required value="2020" min="1880" max="2100" step="1">
+		</label>
+		</p>
+
+		<p>
+		<label>3) Figure:
+			<select id="figure">
+				<option value="cat05_frequency">1: Category 0-5 Cyclone Frequency</option>
+				<option value="cat45_frequency">2: Category 4-5 Cyclone Frequency</option>
+				<option value="intensity">3: Intensity</option>
+				<option value="precipitation">4: Rainfall Rate</option>
+			</select>
+		</label>
+		</P>
+
+		<p>
+		<label>4) Region:
+			<select id="region">
+				<option value="glo">1: Global</option>
+				<option value="nat">2: North Atlantic</option>
+				<option value="nwp">3: North West Pacific</option>
+				<option value="nep">4: North East Pacific</option>
+				<option value="nio">5: North Indian</option>
+				<option value="sio">6: South Indian</option>
+				<option value="swp">7: South West Pacific</option>
+			</select>
+		</label>
+		</p>
+
+		<p>
+		<label>5) Metric:
+			<select id="metric">
+				<option value="q1">1: Minimum</option>
+				<option value="q2">2: 5% or 10%</option>
+				<option value="q3">3: 25%</option>
+				<option value="q4">4: Median (50%)</option>
+				<option value="q5">5: 75%</option>
+				<option value="q6">6: 95% or 90%</option>
+				<option value="q7">7: Maximum</option>
+			</select>
+		</label>
+		</p>
+
+		<table>
+			<thead>
+				<tr>
+					<th>11 year period mid-year</th>
+					<th>RCP 2.6</th>
+					<th>RCP 4.5</th>
+					<th>RCP 6.0</th>
+					<th>RCP 8.5</th>
+				</tr>
+			</thead>
+			<tbody id="output_table">
+			</tbody>
+		</table>
+
+		<p>The same data as CSV:</p>
+		<button type="button" id="copy_csv">Copy</button>
+		<textarea id="output_csv" style="width: 100%" readonly></textarea>
+
+<script>
+"use strict";
+
+const input_names = [
+	"base_start_year",
+	"base_end_year",
+	"figure",
+	"region",
+	"metric",
+];
+const inputs = {};
+for (const input_name of input_names) {
+	inputs[input_name] = document.getElementById(input_name);
+	inputs[input_name].addEventListener("input", () => calculate());
+}
+
+const csv_el = document.getElementById("output_csv");
+
+function calculate() {
+	if (input_names.some(input_name => !inputs[input_name].checkValidity())) {
+		return;
+	}
+
+	let base_start_year = parseInt(inputs.base_start_year.value);
+	const base_end_year = parseInt(inputs.base_end_year.value);
+
+	if (base_start_year > base_end_year) {
+		base_start_year = base_end_year;
+		inputs.base_start_year.value = base_end_year.toString();
+	}
+
+	const base_start_index = base_start_year - gmst_start_year;
+	const base_end_index = base_end_year - gmst_start_year;
+
+	const knutson_value = knutson_data[inputs.figure.value][inputs.region.value][inputs.metric.value];
+
+	const beta = 0.5 * Math.log(0.01 * knutson_value + 1);
+	// The modelled value of the chosen property of the cyclones, for each year for each RCP.
+	const cyclone_properties = gmst.map(rcp => rcp.map(year => Math.exp(beta * year)));
+
+	const baseline_properties = cyclone_properties.map(properties => (
+		mean(properties.slice(base_start_index, base_end_index + 1))
+	));
+
+	const predicted_property_pcs = [];
+
+	const windows = 21;
+	const window_start = 2000;
+	const window_interval = 5;
+	const window_smoothing = 5;
+
+	for (let window_ = 0; window_ < windows; ++window_) {
+		const mid_year = window_start + window_ * window_interval;
+		const mid_index = mid_year - gmst_start_year;
+
+		const actual_smoothing = Math.min(
+			window_smoothing,
+			gmst[0].length - 1 - mid_index,
+			mid_index,
+		);
+
+		const start_index = mid_index - actual_smoothing;
+		const end_index = mid_index + actual_smoothing;
+
+		const predicted_property_pc = [];
+
+		for (let i = 0; i < gmst.length; ++i) {
+			const prediction = mean(cyclone_properties[i].slice(start_index, end_index + 1));
+			const baseline = baseline_properties[i];
+			predicted_property_pc.push(100 * (prediction - baseline) / baseline);
+		}
+
+		predicted_property_pcs.push([mid_index, predicted_property_pc]);
+	}
+
+	document.getElementById("output_table").replaceChildren(
+		...predicted_property_pcs.map(([mid_index, predicted_property_pc]) => {
+			const row = document.createElement("tr");
+			row.append((() => {
+				const cell = document.createElement("td");
+				cell.append(`${mid_index + gmst_start_year}`);
+				return cell;
+			})());
+			row.append(...predicted_property_pc.map(predicted_property_pc => {
+				const cell = document.createElement("td");
+
+				const num = Math.round(predicted_property_pc * 100);
+				const num_frac = Math.abs(num) % 100;
+				const num_whole = Math.trunc(num / 100);
+				cell.append(`${num_whole}.${num_frac.toString().padStart(2, "0")}`);
+
+				return cell;
+			}));
+			return row;
+		})
+	);
+
+	let csv = "Year,2.6,4.5,6.0,8.5\n";
+	for (const [mid_index, predicted_property_pc] of predicted_property_pcs) {
+		csv += `${mid_index + gmst_start_year}`;
+		for (const predicted_property_pc_ of predicted_property_pc) {
+			csv += `,${predicted_property_pc_}`;
+		}
+		csv += `\n`;
+	}
+
+	csv_el.value = csv;
+	csv_el.rows = predicted_property_pcs.length + 2;
+}
+
+document.getElementById("copy_csv").addEventListener("click", () => {
+	csv_el.select();
+	document.execCommand("copy");
+});
+
+const gmst_start_year = 1880;
+const known_gmst = (
+	[-0.16,-0.08,-0.1,-0.16,-0.28,-0.32,-0.3,-0.35,-0.16,-0.1,-0.35,-0.22,-0.27,-0.31,-0.3,-0.22,-0.11,-0.11,-0.26,-0.17,-0.08,-0.15,-0.28,-0.37,-0.47,-0.26,-0.22,-0.39,-0.43,-0.48,-0.43,-0.44,-0.36,-0.34,-0.15,-0.14,-0.36,-0.46,-0.29,-0.27,-0.27,-0.19,-0.28,-0.26,-0.27,-0.22,-0.1,-0.22,-0.2,-0.36,-0.16,-0.1,-0.16,-0.29,-0.13,-0.2,-0.15,-0.03,-0.01,-0.02,0.13,0.19,0.07,0.09,0.2,0.09,-0.07,-0.03,-0.11,-0.11,-0.17,-0.07,0.01,0.08,-0.13,-0.14,-0.19,0.05,0.06,0.03,-0.02,0.06,0.04,0.05,-0.2,-0.11,-0.06,-0.02,-0.08,0.05,0.02,-0.08,0.01,0.16,-0.07,-0.01,-0.1,0.18,0.07,0.16,0.26,0.32,0.14,0.31,0.15,0.11,0.18,0.32,0.38,0.27,0.45,0.4,0.22,0.23,0.32,0.45,0.33,0.47,0.61,0.39,0.39,0.54,0.63,0.62,0.54,0.68,0.64,0.66,0.54,0.66,0.72,0.61,0.64,0.68,0.75,0.9,1.02,0.92,0.85,0.98]
+);
+const gmst = [
+	[...known_gmst,0.909014286,0.938814286,0.999714286,1.034314286,1.009714286,1.020014286,1.040914286,1.068614286,1.072114286,1.095114286,1.100414286,1.099014286,1.118514286,1.133414286,1.135314286,1.168814286,1.200414286,1.205414286,1.227214286,1.212614286,1.243014286,1.270114286,1.250114286,1.254514286,1.265814286,1.263314286,1.294714286,1.289814286,1.314214286,1.322514286,1.315614286,1.276314286,1.302414286,1.318414286,1.312014286,1.317914286,1.341214286,1.297414286,1.308514286,1.314614286,1.327814286,1.335814286,1.331214286,1.318014286,1.289714286,1.334414286,1.323914286,1.316614286,1.300214286,1.302414286,1.303114286,1.311014286,1.283914286,1.293814286,1.296914286,1.316614286,1.306314286,1.290614286,1.288814286,1.272114286,1.264614286,1.262514286,1.290514286,1.285114286,1.267214286,1.267414286,1.294314286,1.315614286,1.310314286,1.283914286,1.296614286,1.281214286,1.301014286,1.300114286,1.303114286,1.286714286,1.297514286,1.312114286,1.276714286,1.281414286,1.276414286],
+	[...known_gmst,0.903592857,0.949092857,0.955792857,0.997892857,1.048392857,1.068092857,1.104792857,1.122192857,1.125792857,1.156292857,1.160992857,1.201692857,1.234692857,1.255392857,1.274392857,1.283792857,1.319992857,1.369992857,1.385592857,1.380892857,1.415092857,1.439892857,1.457092857,1.493592857,1.520292857,1.517692857,1.538092857,1.577192857,1.575492857,1.620392857,1.657092857,1.673492857,1.669992857,1.706292857,1.707892857,1.758592857,1.739492857,1.740192857,1.797792857,1.839292857,1.865392857,1.857692857,1.864092857,1.881192857,1.907592857,1.918492857,1.933992857,1.929392857,1.931192857,1.942492857,1.985592857,1.997392857,2.000992857,2.028692857,2.016192857,2.020792857,2.032892857,2.057492857,2.092092857,2.106292857,2.117492857,2.123492857,2.121092857,2.096892857,2.126892857,2.131292857,2.144892857,2.124092857,2.134492857,2.171392857,2.163692857,2.144092857,2.145092857,2.128992857,2.129992857,2.169192857,2.186492857,2.181092857,2.217592857,2.210492857,2.223692857],
+	[...known_gmst,0.885114286,0.899814286,0.919314286,0.942414286,0.957814286,1.000414286,1.023114286,1.053414286,1.090814286,1.073014286,1.058114286,1.117514286,1.123714286,1.123814286,1.177514286,1.190814286,1.187514286,1.223514286,1.261714286,1.289014286,1.276414286,1.339114286,1.365714286,1.375314286,1.402214286,1.399914286,1.437314286,1.464914286,1.479114286,1.505514286,1.509614286,1.539814286,1.558214286,1.595014286,1.637114286,1.653414286,1.636714286,1.652214286,1.701014286,1.731114286,1.759214286,1.782114286,1.811014286,1.801714286,1.823014286,1.842914286,1.913014286,1.943114286,1.977514286,1.982014286,2.007114286,2.066314286,2.079214286,2.126014286,2.147314286,2.174914286,2.184414286,2.218514286,2.261514286,2.309614286,2.328014286,2.347014286,2.369414286,2.396614286,2.452014286,2.473314286,2.486514286,2.497914286,2.518014286,2.561814286,2.613014286,2.626814286,2.585914286,2.614614286,2.644714286,2.688414286,2.688514286,2.685314286,2.724614286,2.746214286,2.773814286],
+	[...known_gmst,0.945764286,1.011064286,1.048564286,1.049564286,1.070264286,1.126564286,1.195464286,1.215064286,1.246964286,1.272564286,1.262464286,1.293464286,1.340864286,1.391164286,1.428764286,1.452564286,1.494164286,1.520664286,1.557164286,1.633664286,1.654264286,1.693264286,1.730264286,1.795264286,1.824264286,1.823864286,1.880664286,1.952864286,1.991764286,1.994764286,2.085764286,2.105764286,2.155064286,2.227464286,2.249964286,2.313664286,2.341464286,2.394064286,2.457364286,2.484664286,2.549564286,2.605964286,2.656864286,2.707364286,2.742964286,2.789764286,2.847664286,2.903564286,2.925064286,2.962864286,3.002664286,3.069264286,3.133364286,3.174764286,3.217764286,3.256564286,3.306864286,3.375464286,3.420264286,3.476464286,3.493864286,3.552964286,3.592364286,3.630664286,3.672464286,3.734364286,3.789764286,3.838164286,3.882264286,3.936064286,3.984064286,4.055764286,4.098964286,4.122364286,4.172064286,4.225264286,4.275064286,4.339064286,4.375864286,4.408064286,4.477764286],
+];
+
+const knutson_data = {
+	cat05_frequency: {
+		glo: { q1: -27.778, q2: -21.887, q3: -17.328, q4: -12.83, q5: -6.216, q6: 12.222, q7: 22.162 },
+		nat: { q1: -60.377, q2: -34.49, q3: -24.875, q4: -14.444, q5: 3.019, q6: 28.737, q7: 120 },
+		nwp: { q1: -41.25, q2: -30.444, q3: -20, q4: -10.27, q5: 0.377, q6: 17.252, q7: 48.302 },
+		nep: { q1: -41.875, q2: -32.075, q3: -18.491, q4: -3.774, q5: 11.606, q6: 36.682, q7: 55.135 },
+		nio: { q1: -58.113, q2: -35.094, q3: -15.115, q4: -4.465, q5: 5.785, q6: 29.405, q7: 101.081 },
+		sio: { q1: -40, q2: -32.778, q3: -22.522, q4: -17.297, q5: -8.995, q6: 7.241, q7: 20 },
+		swp: { q1: -67.925, q2: -40.417, q3: -26.321, q4: -18.113, q5: -8.21, q6: 4.689, q7: 11.111 },
+	},
+	cat45_frequency: {
+		glo: { q1: -19.623, q2: -13.29, q3: -9.016, q4: -3.396, q5: 8.679, q6: 31.216, q7: 108.108 },
+		nat: { q1: -75.472, q2: -38.038, q3: -22.264, q4: 11.321, q5: 38.302, q6: 81.874, q7: 697.297 },
+		nwp: { q1: -41.081, q2: -25.811, q3: -14.34, q4: -4.75, q5: 16.146, q6: 41.979, q7: 216.216 },
+		nep: { q1: -75.472, q2: -24.83, q3: -6.792, q4: 22.642, q5: 57.297, q6: 104.315, q7: 375.556 },
+		nio: { q1: -64.906, q2: -30.566, q3: -16.415, q4: 5.283, q5: 38.491, q6: 79.119, q7: 324.324 },
+		sio: { q1: -42.264, q2: -23.229, q3: -13.611, q4: 4.528, q5: 26.645, q6: 63.514, q7: 121.081 },
+		swp: { q1: 1 -64.444, q2: -42.453, q3: -29.434, q4: -14.467, q5: -0.541, q6: 19.061, q7: 171.35 },
+	},
+	intensity: {
+		glo: { q1: 1.012, q2: 1.638, q3: 2.644, q4: 4.865, q5: 6.093, q6: 8.343, q7: 9.811 },
+		nat: { q1: -2.038, q2: 0.543, q3: 1.547, q4: 2.943, q5: 4.734, q6: 6.821, q7: 11.351 },
+		nwp: { q1: -0.541, q2: 1.939, q3: 3.205, q4: 5.328, q5: 6.549, q6: 9.306, q7: 12.075 },
+		nep: { q1: -4.528, q2: -2.217, q3: 0.602, q4: 5.472, q5: 9.191, q6: 10.368, q7: 11.892 },
+		nio: { q1: 4.075, q2: -0.973, q3: 1.944, q4: 4.324, q5: 6.15, q6: 7.808, q7: 9.811 },
+		sio: { q1: .298, q2: 1.605, q3: 3.455, q4: 5.405, q5: 7.69, q6: 10.884, q7: 12.83 },
+		swp: { q1: 7.568, q2: -6.318, q3: -0.783, q4: 0.938, q5: 5.314, q6: 12.213, q7: 13.333 },
+	},
+	precipitation: {
+		glo: { q1: 6.25, q2: 6.819, q3: 8.203, q4: 13.722, q5: 16.608, q6: 18.968, q7: 21.622 },
+		nat: { q1: -12, q2: 5.848, q3: 9.122, q4: 15.869, q5: 20.352, q6: 22.803, q7: 27.568 },
+		nwp: { q1: 3.7, q2: 6.273, q3: 12.121, q4: 16.486, q5: 18.323, q6: 23.784, q7: 29.189 },
+		nep: { q1: 4.455, q2: 6.014, q3: 8.108, q4: 21.081, q5: 29.324, q6: 31.838, q7: 33.514 },
+		nio: { q1: 12.432, q2: 12.703, q3: 14.347, q4: 17.649, q5: 19.182, q6: 20.77, q7: 21 },
+		sio: { q1: -1.4, q2: 2.2, q3: 11.919, q4: 19.73, q5: 23.115, q6: 26.243, q7: 26.486 },
+		swp: { q1: -6.486, q2: -1.299, q3: 5.137, q4: 7.297, q5: 11.091, q6: 15.419, q7: 17.838 },	
+	},
+};
+
+const mean = array => array.reduce((acc, val) => acc + val, 0) / array.length;
+
+calculate();
+</script>
+	</body>
+</html>
